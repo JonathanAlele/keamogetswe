@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>keamogetswe — geodesic viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #c8c8c0;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden;
+    height: 100vh;
+  }
+  #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+  canvas { display: block; }
+
+  #ui {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+  }
+  #ui > * { pointer-events: auto; }
+
+  #title {
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    color: #888;
+  }
+  #title span { color: #c8c8c0; }
+
+  #experiment-name {
+    font-size: 12px;
+    color: #666;
+    max-width: 280px;
+  }
+
+  #controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #999;
+    padding: 6px 12px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+    text-align: left;
+  }
+  .ctrl-btn:hover { background: rgba(255,255,255,0.1); color: #ccc; border-color: rgba(255,255,255,0.2); }
+  .ctrl-btn.active { color: #e8e8e0; border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.08); }
+
+  #info {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    font-size: 11px;
+    color: #444;
+    z-index: 10;
+  }
+
+  #drop-overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+    font-size: 16px;
+    color: #888;
+    letter-spacing: 0.1em;
+  }
+  #drop-overlay.visible { display: flex; }
+
+  #legend {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #888;
+  }
+  .legend-swatch {
+    width: 20px;
+    height: 3px;
+    border-radius: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="ui">
+  <div id="title"><span>keamogetswe</span> viewer</div>
+  <div id="experiment-name">Drop a JSON file or select a sample</div>
+  <div id="controls">
+    <button class="ctrl-btn" onclick="loadSample('experiment_0')">Exp 0 — Euclidean</button>
+    <button class="ctrl-btn" onclick="loadSample('experiment_1')">Exp 1 — Heat flow</button>
+    <button class="ctrl-btn" onclick="loadSample('experiment_2')">Exp 2 — K-M mixing</button>
+  </div>
+</div>
+
+<div id="legend"></div>
+<div id="info">Orbit: drag &nbsp; Zoom: scroll &nbsp; Pan: right-drag</div>
+<div id="drop-overlay">Drop JSON file</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function() {
+  const container = document.getElementById('canvas-container');
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
+  camera.position.set(2.2, 1.8, 2.2);
+  camera.lookAt(0.5, 0.5, 0.5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setClearColor(0x0a0a0a, 1);
+  container.appendChild(renderer.domElement);
+
+  // ── Orbit controls (minimal implementation) ──
+  let isDragging = false;
+  let isPanning = false;
+  let prevMouse = { x: 0, y: 0 };
+  let spherical = { radius: 3.0, theta: Math.PI / 4, phi: Math.PI / 3 };
+  let target = new THREE.Vector3(0.5, 0.5, 0.5);
+
+  function updateCamera() {
+    const r = spherical.radius;
+    camera.position.set(
+      target.x + r * Math.sin(spherical.phi) * Math.cos(spherical.theta),
+      target.y + r * Math.cos(spherical.phi),
+      target.z + r * Math.sin(spherical.phi) * Math.sin(spherical.theta)
+    );
+    camera.lookAt(target);
+  }
+
+  renderer.domElement.addEventListener('mousedown', (e) => {
+    if (e.button === 2) { isPanning = true; } else { isDragging = true; }
+    prevMouse = { x: e.clientX, y: e.clientY };
+  });
+  renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging && !isPanning) return;
+    const dx = e.clientX - prevMouse.x;
+    const dy = e.clientY - prevMouse.y;
+    prevMouse = { x: e.clientX, y: e.clientY };
+
+    if (isDragging) {
+      spherical.theta -= dx * 0.005;
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - dy * 0.005));
+      updateCamera();
+    }
+    if (isPanning) {
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      camera.getWorldDirection(up);
+      right.crossVectors(up, camera.up).normalize();
+      up.copy(camera.up).normalize();
+      target.addScaledVector(right, -dx * 0.002);
+      target.addScaledVector(up, dy * 0.002);
+      updateCamera();
+    }
+  });
+
+  window.addEventListener('mouseup', () => { isDragging = false; isPanning = false; });
+  renderer.domElement.addEventListener('wheel', (e) => {
+    spherical.radius = Math.max(0.5, Math.min(10, spherical.radius + e.deltaY * 0.002));
+    updateCamera();
+    e.preventDefault();
+  }, { passive: false });
+
+  updateCamera();
+
+  // ── RGB Cube ──
+  function buildCube() {
+    // Wireframe edges
+    const edgeGeo = new THREE.BufferGeometry();
+    const verts = [
+      0,0,0, 1,0,0,  1,0,0, 1,1,0,  1,1,0, 0,1,0,  0,1,0, 0,0,0,
+      0,0,1, 1,0,1,  1,0,1, 1,1,1,  1,1,1, 0,1,1,  0,1,1, 0,0,1,
+      0,0,0, 0,0,1,  1,0,0, 1,0,1,  1,1,0, 1,1,1,  0,1,0, 0,1,1
+    ];
+    edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+
+    // Color each vertex by its RGB position
+    const colors = [];
+    for (let i = 0; i < verts.length; i += 3) {
+      colors.push(verts[i], verts[i+1], verts[i+2]);
+    }
+    edgeGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const edgeMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.35 });
+    scene.add(new THREE.LineSegments(edgeGeo, edgeMat));
+
+    // Corner dots
+    const corners = [
+      [0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]
+    ];
+    corners.forEach(c => {
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.012, 8, 8),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(c[0], c[1], c[2]) })
+      );
+      dot.position.set(c[0], c[1], c[2]);
+      scene.add(dot);
+    });
+
+    // Axis labels
+    addAxisLabel('R', 1.08, -0.04, -0.04, '#e24b4a');
+    addAxisLabel('G', -0.04, 1.08, -0.04, '#639922');
+    addAxisLabel('B', -0.04, -0.04, 1.08, '#378add');
+    addAxisLabel('0', -0.06, -0.06, -0.06, '#555');
+  }
+
+  function addAxisLabel(text, x, y, z, color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 40px monospace';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 32, 32);
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    sprite.position.set(x, y, z);
+    sprite.scale.set(0.12, 0.12, 1);
+    scene.add(sprite);
+  }
+
+  buildCube();
+
+  // ── Path rendering ──
+  let pathMeshes = [];
+
+  // Subtle glow colors for distinguishing multiple paths when RGB isn't enough
+  const pathGlowColors = [null, '#e8e8e0', '#ff6b6b', '#4ecdc4', '#ffe66d'];
+
+  function clearPaths() {
+    pathMeshes.forEach(m => scene.remove(m));
+    pathMeshes = [];
+    document.getElementById('legend').innerHTML = '';
+  }
+
+  function addPath(points, label, pathIndex) {
+    if (points.length < 2) return;
+
+    // Build geometry with per-vertex RGB colors
+    const positions = [];
+    const colors = [];
+
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      positions.push(p[0], p[1], p[2]);
+      colors.push(p[0], p[1], p[2]);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.95
+    });
+
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    pathMeshes.push(line);
+
+    // Start and end markers
+    const startColor = new THREE.Color(points[0][0], points[0][1], points[0][2]);
+    const endColor = new THREE.Color(points[points.length-1][0], points[points.length-1][1], points[points.length-1][2]);
+
+    const startDot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.015, 12, 12),
+      new THREE.MeshBasicMaterial({ color: startColor })
+    );
+    startDot.position.set(points[0][0], points[0][1], points[0][2]);
+    scene.add(startDot);
+    pathMeshes.push(startDot);
+
+    const endDot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.015, 12, 12),
+      new THREE.MeshBasicMaterial({ color: endColor })
+    );
+    const last = points[points.length - 1];
+    endDot.position.set(last[0], last[1], last[2]);
+    scene.add(endDot);
+    pathMeshes.push(endDot);
+
+    // Legend entry - show the midpoint color as the swatch
+    const mid = points[Math.floor(points.length / 2)];
+    const midHex = '#' + [mid[0], mid[1], mid[2]].map(c =>
+      Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, '0')
+    ).join('');
+
+    const legendEl = document.getElementById('legend');
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = '<div class="legend-swatch" style="background:' + midHex + '"></div>' +
+      label + ' (' + points.length + ' pts)';
+    legendEl.appendChild(item);
+  }
+
+  function loadData(data) {
+    clearPaths();
+
+    if (data.metadata && data.metadata.name) {
+      document.getElementById('experiment-name').textContent = data.metadata.name;
+    }
+
+    if (data.paths) {
+      data.paths.forEach((p, i) => addPath(p.points, p.label, i));
+    }
+
+    // Update button states
+    document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
+  }
+
+  // ── Sample data loading ──
+  window.loadSample = function(name) {
+    fetch('sample_data/' + name + '.json')
+      .then(r => r.json())
+      .then(data => {
+        loadData(data);
+        document.querySelectorAll('.ctrl-btn').forEach(b => {
+          b.classList.toggle('active', b.textContent.toLowerCase().includes(name.replace('experiment_', 'exp ')));
+        });
+      })
+      .catch(err => {
+        document.getElementById('experiment-name').textContent = 'Error loading: ' + err.message;
+      });
+  };
+
+  // ── Drag and drop ──
+  const overlay = document.getElementById('drop-overlay');
+  let dragCounter = 0;
+
+  document.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; overlay.classList.add('visible'); });
+  document.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { overlay.classList.remove('visible'); dragCounter = 0; } });
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    overlay.classList.remove('visible');
+    dragCounter = 0;
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        loadData(data);
+      } catch (err) {
+        document.getElementById('experiment-name').textContent = 'Invalid JSON: ' + err.message;
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  // ── Resize ──
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ── Render loop ──
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Load first experiment by default
+  loadSample('experiment_0');
+})();
+</script>
+</body>
+</html>

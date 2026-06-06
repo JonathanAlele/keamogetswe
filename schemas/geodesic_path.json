@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GeodesicOutput",
+  "description": "Output format for keamogetswe geodesic computations. The contract between the Rust crate and the viewer.",
+  "type": "object",
+  "required": ["metadata", "paths"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Human-readable experiment name" },
+        "metric": { "type": "string", "description": "Name of the metric used" },
+        "resolution": { "type": "integer", "description": "FMM grid resolution (N per axis)" }
+      }
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "points"],
+        "properties": {
+          "label": { "type": "string", "description": "Path identifier (e.g. 'computed', 'analytical')" },
+          "points": {
+            "type": "array",
+            "description": "Ordered sequence of [R, G, B] points in [0,1]³",
+            "items": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 1 },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        }
+      }
+    }
+  }
+}
