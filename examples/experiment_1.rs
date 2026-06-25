@@ -12,7 +12,7 @@ fn main() {
 
     let start = [0.2, 0.9, 0.2];
     let end = [0.433, 0.433, 0.433];
-    let resolution = 256;
+    let resolution = 128;
 
     println!("Running heat flow experiment at N={}...", resolution);
     let path = solve(&space, &metric, start, end, resolution);

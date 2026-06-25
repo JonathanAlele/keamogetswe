@@ -5,8 +5,8 @@ use keamogetswe::space::CubeSpace;
 fn main() {
     let _space = CubeSpace;
     let _metric = EuclideanMetric;
-    let _start = [0.0,0.0,0.3];
-    let _end = [1.0, 0.2, 0.8];
+    let _start = [0.2, 0.3, 0.4];
+    let _end = [0.8, 0.6, 0.7];
     let _resolution = 128;
 
     let path = keamogetswe::solver::solve(&_space, &_metric, _start, _end, _resolution);
