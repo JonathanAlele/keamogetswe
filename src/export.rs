@@ -1,5 +1,4 @@
 use serde::Serialize;
-use crate::path::GeodesicPath;
 
 /// A complete output file containing one or more paths for the viewer.
 #[derive(Debug, Serialize)]
