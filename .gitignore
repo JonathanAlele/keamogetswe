@@ -1,2 +1,5 @@
 /.idea
 target/
+target/debug
+/target
+/target/debug
