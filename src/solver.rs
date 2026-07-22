@@ -233,7 +233,10 @@ fn extract_path(cost: &[f64], end_idx: usize, n: usize, h: f64) -> Vec<Point3> {
     let idx = |x: usize, y: usize, z: usize| z * n * n + y * n + x;
     let coords = |i: usize| (i % n, (i / n) % n, i / (n * n));
 
-    let mut path = Vec::new();
+    // Raw descent trajectory: (world point, cost T at that point).
+    // The cost parametrization is what carries the domain's nonlinearity;
+    // we resample by it after the descent.
+    let mut trajectory: Vec<(Point3, f64)> = Vec::new();
 
     // Start at the end point as continuous coordinates
     let (ex, ey, ez) = coords(end_idx);
@@ -245,17 +248,17 @@ fn extract_path(cost: &[f64], end_idx: usize, n: usize, h: f64) -> Vec<Point3> {
     let max_steps = n * n * n;
 
     for _ in 0..max_steps {
-        // Convert current continuous position to a world point
-        path.push([px * h, py * h, pz * h]);
-
         // Snap to nearest grid cell to read the distance field
         let gx = (px.round() as usize).min(n - 1);
         let gy = (py.round() as usize).min(n - 1);
         let gz = (pz.round() as usize).min(n - 1);
 
+        // Record the current position with its cost value
+        trajectory.push(([px * h, py * h, pz * h], cost[idx(gx, gy, gz)]));
+
         if cost[idx(gx, gy, gz)] < h {
             // Close enough to the source
-            path.push([gx as f64 * h, gy as f64 * h, gz as f64 * h]);
+            trajectory.push(([gx as f64 * h, gy as f64 * h, gz as f64 * h], 0.0));
             break;
         }
 
@@ -305,7 +308,58 @@ fn extract_path(cost: &[f64], end_idx: usize, n: usize, h: f64) -> Vec<Point3> {
         pz = pz.max(0.0).min((n - 1) as f64);
     }
 
-    path.reverse();
+    trajectory.reverse();
+    resample_by_cost(&trajectory)
+}
+
+/// Resample a (point, cost) trajectory at equal cost increments.
+///
+/// The descent produces points at uniform arclength, which erases the
+/// cost parametrization. Emitting points at uniform ΔT restores it:
+/// spacing shrinks where friction is high and stretches where it is low.
+fn resample_by_cost(trajectory: &[(Point3, f64)]) -> Vec<Point3> {
+    if trajectory.len() < 2 {
+        return trajectory.iter().map(|(p, _)| *p).collect();
+    }
+
+    let num_points = trajectory.len();
+    let t_start = trajectory[0].1;
+    let t_end = trajectory[trajectory.len() - 1].1;
+    let span = t_end - t_start;
+
+    if span.abs() < 1e-12 {
+        return trajectory.iter().map(|(p, _)| *p).collect();
+    }
+
+    let mut path = Vec::with_capacity(num_points);
+    let mut cursor = 0;
+
+    for i in 0..num_points {
+        let target = t_start + span * (i as f64 / (num_points - 1) as f64);
+
+        // Advance to the segment containing the target cost.
+        // Costs along the reversed trajectory increase from source to
+        // target, but grid snapping can produce small non-monotonic
+        // wiggles, so we only ever move the cursor forward.
+        while cursor + 1 < num_points - 1 && trajectory[cursor + 1].1 < target {
+            cursor += 1;
+        }
+
+        let (p0, t0) = trajectory[cursor];
+        let (p1, t1) = trajectory[cursor + 1];
+        let frac = if (t1 - t0).abs() < 1e-12 {
+            0.0
+        } else {
+            ((target - t0) / (t1 - t0)).max(0.0).min(1.0)
+        };
+
+        path.push([
+            p0[0] + frac * (p1[0] - p0[0]),
+            p0[1] + frac * (p1[1] - p0[1]),
+            p0[2] + frac * (p1[2] - p0[2]),
+        ]);
+    }
+
     path
 }
 struct FmmEntry {

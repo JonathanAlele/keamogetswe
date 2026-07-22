@@ -99,11 +99,19 @@
     gap: 8px;
     font-size: 11px;
     color: #888;
+    cursor: pointer;
+    padding: 3px 6px;
+    border: 1px solid transparent;
+    user-select: none;
   }
+  .legend-item:hover { color: #ccc; border-color: rgba(255,255,255,0.15); }
+  .legend-item.hidden-path { opacity: 0.35; }
+  .legend-item.hidden-path .legend-swatch { filter: grayscale(1); }
   .legend-swatch {
-    width: 20px;
+    width: 28px;
     height: 3px;
     border-radius: 1px;
+    flex-shrink: 0;
   }
 </style>
 </head>
@@ -256,24 +264,32 @@
   buildCube();
 
   // ── Path rendering ──
-  let pathMeshes = [];
+  let pathGroups = [];
 
-  // Subtle glow colors for distinguishing multiple paths when RGB isn't enough
-  const pathGlowColors = [null, '#e8e8e0', '#ff6b6b', '#4ecdc4', '#ffe66d'];
+  // Path 0 (computed) keeps its true RGB colouring. Reference paths get a
+  // distinct accent colour and dash pattern so overlapping curves stay
+  // distinguishable even when their RGB profiles are nearly identical.
+  const referenceStyles = [
+    { color: '#e8e8e0', dashSize: 0.030, gapSize: 0.018 },  // long dash, white
+    { color: '#ff6b6b', dashSize: 0.008, gapSize: 0.014 },  // dotted, red
+    { color: '#4ecdc4', dashSize: 0.030, gapSize: 0.018 },  // long dash, teal
+    { color: '#ffe66d', dashSize: 0.008, gapSize: 0.014 }   // dotted, yellow
+  ];
 
   function clearPaths() {
-    pathMeshes.forEach(m => scene.remove(m));
-    pathMeshes = [];
+    pathGroups.forEach(g => scene.remove(g));
+    pathGroups = [];
     document.getElementById('legend').innerHTML = '';
   }
 
   function addPath(points, label, pathIndex) {
     if (points.length < 2) return;
 
-    // Build geometry with per-vertex RGB colors
+    const group = new THREE.Group();
+    const style = pathIndex === 0 ? null : referenceStyles[(pathIndex - 1) % referenceStyles.length];
+
     const positions = [];
     const colors = [];
-
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       positions.push(p[0], p[1], p[2]);
@@ -284,49 +300,74 @@
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    const mat = new THREE.LineBasicMaterial({
-      vertexColors: true,
-      linewidth: 2,
-      transparent: true,
-      opacity: 0.95
-    });
+    let line;
+    if (!style) {
+      // Computed path: solid, coloured by true RGB position
+      const mat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        linewidth: 2,
+        transparent: true,
+        opacity: 0.95
+      });
+      line = new THREE.Line(geo, mat);
+    } else {
+      // Reference path: dashed accent colour
+      const mat = new THREE.LineDashedMaterial({
+        color: new THREE.Color(style.color),
+        dashSize: style.dashSize,
+        gapSize: style.gapSize,
+        transparent: true,
+        opacity: 0.85
+      });
+      line = new THREE.Line(geo, mat);
+      line.computeLineDistances();
+    }
+    group.add(line);
 
-    const line = new THREE.Line(geo, mat);
-    scene.add(line);
-    pathMeshes.push(line);
+    // Start and end markers — only for the computed path, so overlapping
+    // reference curves don't stack identical dots at the endpoints
+    if (!style) {
+      [points[0], points[points.length - 1]].forEach(p => {
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(0.015, 12, 12),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(p[0], p[1], p[2]) })
+        );
+        dot.position.set(p[0], p[1], p[2]);
+        group.add(dot);
+      });
+    }
 
-    // Start and end markers
-    const startColor = new THREE.Color(points[0][0], points[0][1], points[0][2]);
-    const endColor = new THREE.Color(points[points.length-1][0], points[points.length-1][1], points[points.length-1][2]);
+    scene.add(group);
+    pathGroups.push(group);
 
-    const startDot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.015, 12, 12),
-      new THREE.MeshBasicMaterial({ color: startColor })
-    );
-    startDot.position.set(points[0][0], points[0][1], points[0][2]);
-    scene.add(startDot);
-    pathMeshes.push(startDot);
-
-    const endDot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.015, 12, 12),
-      new THREE.MeshBasicMaterial({ color: endColor })
-    );
-    const last = points[points.length - 1];
-    endDot.position.set(last[0], last[1], last[2]);
-    scene.add(endDot);
-    pathMeshes.push(endDot);
-
-    // Legend entry - show the midpoint color as the swatch
-    const mid = points[Math.floor(points.length / 2)];
-    const midHex = '#' + [mid[0], mid[1], mid[2]].map(c =>
-      Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, '0')
-    ).join('');
+    // Legend entry — swatch mirrors the on-screen style: a start→end RGB
+    // gradient for the computed path, the dash pattern for reference paths.
+    let swatchCss;
+    if (!style) {
+      const hex = p => '#' + p.slice(0, 3).map(c =>
+        Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, '0')
+      ).join('');
+      const mid = points[Math.floor(points.length / 2)];
+      swatchCss = 'background: linear-gradient(90deg,' +
+        hex(points[0]) + ',' + hex(mid) + ',' + hex(points[points.length - 1]) + ')';
+    } else {
+      const dashPx = Math.max(2, Math.round(style.dashSize * 300));
+      const gapPx = Math.max(2, Math.round(style.gapSize * 300));
+      swatchCss = 'background: repeating-linear-gradient(90deg,' +
+        style.color + ' 0,' + style.color + ' ' + dashPx + 'px,' +
+        'transparent ' + dashPx + 'px, transparent ' + (dashPx + gapPx) + 'px)';
+    }
 
     const legendEl = document.getElementById('legend');
     const item = document.createElement('div');
     item.className = 'legend-item';
-    item.innerHTML = '<div class="legend-swatch" style="background:' + midHex + '"></div>' +
+    item.title = 'Click to show/hide';
+    item.innerHTML = '<div class="legend-swatch" style="' + swatchCss + '"></div>' +
       label + ' (' + points.length + ' pts)';
+    item.addEventListener('click', () => {
+      group.visible = !group.visible;
+      item.classList.toggle('hidden-path', !group.visible);
+    });
     legendEl.appendChild(item);
   }
 
