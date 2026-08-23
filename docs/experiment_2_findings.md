@@ -1,7 +1,7 @@
 # Experiment 2: Kubelka-Munk Colour Mixing — Results and Findings
 
-**Status:** PASS  
-**Date:** June 2026 (P2.3 resolved July 2026)  
+**Status:** PASS — all three predictions  
+**Date:** June 2026 (P2.3 resolved July 2026; re-measured August 2026, numbers unchanged)  
 **Metric:** KubelkaMunkMetric (isotropic reformulation, λ=50.0)  
 **Resolution:** N=128  
 
@@ -12,6 +12,12 @@
 | P2.1 Path follows K-M curve | < 0.05 max deviation | 0.0371 | **PASS** |
 | P2.2 Green intermediates (G > R and G > B) | at any point | yes | **PASS** |
 | P2.3 Nonlinear spacing (max/min ratio) | > 1.5 | 9.06 | **PASS** |
+
+Experiment 2 is now the project's strongest validation. Unlike Experiment 1 — whose
+configuration turns out to be geometrically degenerate, see `experiment_1_findings.md` —
+the K-M mixing curve is genuinely non-straight and arcs through green where the Euclidean
+path passes through grey. P2.1 and P2.2 could therefore have failed, and their passing is
+real evidence.
 
 P2.3 originally failed (ratio 1.07) with the fixed-step extraction; see the root cause
 analysis and fix below. P2.1 moved from 0.0366 to 0.0371 under the new extraction —

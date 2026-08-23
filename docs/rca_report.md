@@ -143,3 +143,60 @@ reparametrizes the geodesic by arclength, which structurally erases the cost
 parametrization that the prediction measures. The fix is to expose cost-along-path in
 the extracted output (or to restate the prediction in cost terms), not to tune the
 step size.
+
+---
+
+## 6. Resolution (as of August 2026)
+
+*Appended after the fact. The report above is preserved as the dated record of an
+independent analysis; §2's results table reflects the state on 22 July 2026 and its
+P2.3 **FAIL** row is no longer current. Read this section alongside it.*
+
+### Resolved
+
+**P2.3 (§3) — fixed.** Suggested correction #1 from §3.4 was implemented in commit
+`f32db1a` as `resample_by_cost` (`src/solver.rs:320-364`): `extract_path` now records the
+distance-field value T at each descent position and re-emits the path at equal increments
+of ΔT, interpolating between descent samples. The spacing ratio moved from 1.07 to
+**9.06** against a threshold of 1.5. The structural diagnosis in §3.3 — that this was a
+readout/parametrization defect and not a solver or metric error — was correct, and the
+fix followed directly from it. Experiments 0 and 1 were re-run as a regression check with
+no change to their geometry.
+
+**§4.4 documentation drift — addressed.** `docs/` now exists and holds this report,
+`project_status.md`, and findings documents for all three experiments; the previously
+dangling reference to `docs/experiment_1_findings.md` now resolves, and the README no
+longer labels completed modules as stubs.
+
+**§4.2 stale build artefact — addressed.** `target/` is gitignored as of commit `1f9e024`.
+
+### Still open
+
+**§4.3 — `cargo test` still runs zero tests.** No `#[test]` functions exist. This is
+hardening item H1 and is now the project's highest-priority engineering work; see
+`docs/project_status.md`.
+
+**§4.1 isotropic solver — confirmed, unaddressed.** The finding stands. True anisotropy
+requires a tensor eikonal solver.
+
+### Superseded or extended by later measurement
+
+The report's §2 table reproduced the then-current record for Experiments 0 and 1. Both
+have since been measured directly for the first time, and neither matches what was
+recorded:
+
+- **Experiment 0 was never validated by any code.** `examples/experiment_0.rs` prints the
+  total cost and checks nothing. On first measurement P0.1 passes but **P0.2 fails**
+  (cost 0.7485 vs √0.54 ± 1%, an overestimate of 1.86%) and **P0.3 fails** (grid-scale
+  curvature chatter). See `docs/experiment_0_findings.md`.
+- **Experiment 1's P1.3 is a failure, not a qualification** (deviation 0.0713 against a
+  ±0.02 tolerance), and its worst excursion is at 9% along the path rather than near
+  equilibrium as previously reasoned. More significantly, its initial condition is an
+  eigenvector of the discrete Laplacian, so the analytical trajectory is an exact
+  straight line and P1.1 has almost no discriminating power. See
+  `docs/experiment_1_findings.md`.
+
+Both findings are of the same family as this report's own conclusion about P2.3:
+**the solver's output has repeatedly been better than, or different from, what the
+project's readout and record claimed of it.** The remedy in every case is the same —
+measure it in code, and let the assertion rather than the prose be the record.
